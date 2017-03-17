@@ -1,7 +1,7 @@
 module socketio.transport;
 
 import vibe.core.core;
-import vibe.core.signal;
+import vibe.core.sync : ManualEvent;
 import vibe.data.json;
 import vibe.http.server;
 import vibe.http.websockets;
@@ -15,9 +15,9 @@ import core.time;
 
 class EventObject
 {
-    alias void delegate(Json[] data) Handler;
-    alias void delegate(Json data) HandlerSingle;
-    alias void delegate() HandlerEmpty;
+    alias Handler = void delegate(Json[] data);
+    alias HandlerSingle = void delegate(Json data);
+    alias HandlerEmpty = void delegate();
 
     void on(string name, Handler dg)
     {
@@ -79,12 +79,12 @@ package:
     SocketIo m_manager;
     Transport m_transport;
     string m_id;
-    Signal m_signal;
+    ManualEvent m_manualEvent;
     HandlerSingle[] m_onJson;
     HandlerString[] m_onMessage;
     Timer m_heartbeatTimer;
     Timer m_closeTimer;
-    
+
     ubyte[] m_toSend;
     bool m_hasData = false;
 
@@ -94,9 +94,9 @@ package:
         m_id = id_;
         m_transport = transport;
         m_transport.m_socket = this;
-        m_signal = createSignal();
-        m_heartbeatTimer = getEventDriver().createTimer(&this.heartbeat);
-        m_closeTimer = getEventDriver().createTimer(&this.onClose);
+        m_manualEvent = createManualEvent();
+        m_heartbeatTimer = createTimer(&this.heartbeat);
+        m_closeTimer = createTimer(&this.onClose);
     }
 
     @property auto params()
@@ -106,11 +106,11 @@ package:
 
     void cleanup()
     {
-        m_signal.release();
+        //m_manualEvent.release();
         m_closeTimer.stop();
     }
 
-    void heartbeat()
+    void heartbeat() @trusted
     {
         send(Message(MessageType.heartbeat));
     }
@@ -125,7 +125,7 @@ package:
         m_closeTimer.stop();
     }
 
-    void onClose()
+    void onClose() @trusted
     {
         emitEvent("disconnect", []);
     }
@@ -148,7 +148,7 @@ package:
     void sendData(ubyte[] data)
     {
         schedule(data);
-        m_signal.emit();
+        m_manualEvent.emit();
     }
 
     void schedule(ubyte[] data)
@@ -191,31 +191,31 @@ abstract class Transport
 {
     IoSocket m_socket;
 
-    final @property Signal signal() { return m_socket.m_signal; }
+    final @property ManualEvent manualEvent() { return m_socket.m_manualEvent; }
 
-    abstract void onRequest(HttpServerRequest req, HttpServerResponse res);
+    abstract void onRequest(HTTPServerRequest req, HTTPServerResponse res);
     abstract void send(ubyte[] data);
 }
 
 class WebSocketTransport : Transport
 {
     WebSocket m_websocket;
-    
+
     this(WebSocket ws)
     {
         m_websocket = ws;
     }
 
-    override void onRequest(HttpServerRequest req, HttpServerResponse res)
+    override void onRequest(HTTPServerRequest req, HTTPServerResponse res)
     {
-        signal.acquire();
+        manualEvent.wait();
         while(m_websocket.connected)
         {
             if(m_websocket.dataAvailableForRead())
-                m_socket.onData(cast(string) m_websocket.receive());
+                m_socket.onData(m_websocket.receiveText);
 
             m_socket.flush();
-            
+
             rawYield();
         }
         m_socket.onClose();
@@ -229,26 +229,28 @@ class WebSocketTransport : Transport
 
 class XHRPollingTransport : Transport
 {
+    import vibe.stream.operations : readAllUTF8;
+
     Timer m_pollTimeout;
-    HttpServerResponse m_response;
+    HTTPServerResponse m_response;
 
     this()
     {
-        m_pollTimeout = getEventDriver().createTimer(&onPollTimeout);
+        m_pollTimeout = createTimer(&onPollTimeout);
     }
 
-    override void onRequest(HttpServerRequest req, HttpServerResponse res)
+    override void onRequest(HTTPServerRequest req, HTTPServerResponse res)
     {
         m_socket.clearCloseTimeout();
 
-        if(req.method == HttpMethod.POST)
+        if(req.method == HTTPMethod.POST)
         {
-            auto data = req.bodyReader.readAll();
-            m_socket.onData(cast(string)data);
-            res.statusCode = HttpStatus.OK;
+            auto data = req.bodyReader.readAllUTF8();
+            m_socket.onData(cast(string) data);
+            res.statusCode = HTTPStatus.OK;
             res.writeBody("1");
         }
-        else if(req.method == HttpMethod.GET)
+        else if(req.method == HTTPMethod.GET)
         {
             m_response = res;
             if(m_socket.m_hasData)
@@ -257,14 +259,14 @@ class XHRPollingTransport : Transport
             }
             else
             {
-                signal.acquire();
+                manualEvent.wait();
                 m_pollTimeout.rearm(dur!"seconds"(m_socket.params.pollingDuration));
                 rawYield();
 
                 onClose();
 
                 m_socket.flush();
-                signal.release();
+                //manualEvent.release();
             }
         }
     }
@@ -272,7 +274,7 @@ class XHRPollingTransport : Transport
     override void send(ubyte[] data)
     {
         auto res = m_response;
-        res.statusCode = HttpStatus.OK;
+        res.statusCode = HTTPStatus.OK;
         res.writeBody(data, "text/plain; charset=UTF-8");
     }
 

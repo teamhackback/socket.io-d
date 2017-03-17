@@ -1,0 +1,8 @@
+name "socket.io"
+description "A minimal Vibe.d socket.io client"
+authors "HackBack"
+copyright "Copyright © 2017, HackBack"
+license "MIT"
+dependency "vibe-d:core" version="~>0.7.30"
+dependency "vibe-d:data" version="~>0.7.30"
+dependency "vibe-d:http" version="~>0.7.30"

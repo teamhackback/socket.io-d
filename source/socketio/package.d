@@ -1,7 +1,6 @@
 module socketio.socketio;
 
 import vibe.core.log;
-import vibe.core.signal;
 import vibe.http.server;
 import vibe.http.websockets;
 import vibe.http.router;
@@ -26,10 +25,14 @@ class SocketIo
 {
     alias void delegate(IoSocket socket) Handler;
 
-    package {
+    package(socketio) {
+        /// all open sockets
         IoSocket[string] m_sockets;
+        /// ids of all connected clients
         bool[string] m_connected;
+        /// custom connect handler
         Handler m_onConnect;
+        /// user-defined settings
         Parameters m_params;
     }
 
@@ -44,7 +47,7 @@ class SocketIo
         return m_params;
     }
 
-    void handleRequest(HttpServerRequest req, HttpServerResponse res)
+    void handleRequest(HTTPServerRequest req, HTTPServerResponse res)
     {
         auto root = "/socket.io";
         if(!req.path.startsWith(root))
@@ -54,21 +57,21 @@ class SocketIo
         auto id = pieces[3];
         req.params["transport"] = pieces[2];
         req.params["sessid"] = id;
-        auto dg = id.empty ? &handleHandhakeRequest : &handleHttpRequest;
+        auto dg = id.empty ? &handleHandhakeRequest : &handleHTTPRequest;
         dg(req, res);
     }
 
-    void handleHandhakeRequest(HttpServerRequest req, HttpServerResponse res)
+    void handleHandhakeRequest(HTTPServerRequest req, HTTPServerResponse res)
     {
         auto transports = m_params.transports.join(",");
         auto hbt = m_params.heartbeatTimeout.to!string();
         auto ct  = m_params.closeTimeout.to!string();
         string data = [generateId(), hbt, ct, transports].join(":");
-        res.statusCode = HttpStatus.OK;
+        res.statusCode = HTTPStatus.OK;
         res.writeBody(data, "text/plain;");
     }
 
-    void handleHttpRequest(HttpServerRequest req, HttpServerResponse res)
+    void handleHTTPRequest(HTTPServerRequest req, HTTPServerResponse res)
     {
         auto transportName = req.params["transport"];
         auto id = req.params["sessid"];
@@ -76,7 +79,7 @@ class SocketIo
         switch(transportName)
         {
         case "websocket":
-            auto callback = handleWebSockets( (websocket) {
+            auto callback = handleWebSockets( delegate(scope websocket) {
                 auto tr = new WebSocketTransport(websocket);
                 auto ioSocket = new IoSocket(this, id, tr);
                 onConnect(ioSocket, req, res);
@@ -112,7 +115,7 @@ private:
         Regex!char urlRe;
     }
 
-    void onConnect(IoSocket ioSocket, HttpServerRequest req, HttpServerResponse res)
+    void onConnect(IoSocket ioSocket, HTTPServerRequest req, HTTPServerResponse res)
     {
         auto id = ioSocket.id;
 
@@ -132,7 +135,7 @@ private:
         }
 
         m_sockets[id] = ioSocket;
-     
+
         ioSocket.setHeartbeatTimeout();
 
         ioSocket.m_transport.onRequest(req, res);

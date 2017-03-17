@@ -1,10 +1,8 @@
 module socketio.parser;
 
-import vibe.vibe;
+import vibe.data.json;
 
-import std.regex;
-import std.conv;
-
+import std.conv : to;
 
 enum MessageType
 {
@@ -29,6 +27,7 @@ struct Message
 
 auto decodePacket(string packet)
 {
+    import std.regex;
     auto re = regex("([^:]+):([0-9]+)?(\\+)?:([^:]+)?:?([\\s\\S]*)?");
     auto m = match(packet, re);
     auto type = m.captures[1];
@@ -44,8 +43,8 @@ auto decodePacket(string packet)
             break;
         case MessageType.event:
             auto json = parseJson(data);
-            msg.name = json.name.get!string;
-            msg.args = json.args.get!(Json[]);
+            msg.name = json["name"].get!string;
+            msg.args = json["args"].get!(Json[]);
             break;
         default:
     }
@@ -62,9 +61,9 @@ string encodePacket(Message packet)
     switch(packet.type)
     {
         case MessageType.event:
-            auto ev = Json.EmptyObject();
-            ev.name = packet.name;
-            ev.args = packet.args;
+            auto ev = Json.emptyObject();
+            ev["name"] = packet.name;
+            ev["args"] = packet.args;
             data = ev.toString();
             haveData = true;
             break;
