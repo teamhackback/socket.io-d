@@ -7,4 +7,5 @@ class Parameters
     int closeTimeout = 60;
     int heartbeatInterval = 25;
     int heartbeatTimeout = 60;
+    bool useCORS = false;
 }

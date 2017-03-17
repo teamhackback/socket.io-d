@@ -49,6 +49,7 @@ class SocketIo
 
     void handleRequest(HTTPServerRequest req, HTTPServerResponse res)
     {
+        import std.stdio;
         auto root = "/socket.io";
         if(!req.path.startsWith(root))
             return;
@@ -58,6 +59,11 @@ class SocketIo
         req.params["transport"] = pieces[2];
         req.params["sessid"] = id;
         auto dg = id.empty ? &handleHandhakeRequest : &handleHTTPRequest;
+        if (m_params.useCORS)
+        {
+            res.headers["Access-Control-Allow-Origin"] = "http://localhost:3000";
+            res.headers["Access-Control-Allow-Credentials"] = "true";
+        }
         dg(req, res);
     }
 
@@ -68,6 +74,7 @@ class SocketIo
         auto ct  = m_params.closeTimeout.to!string();
         string data = [generateId(), hbt, ct, transports].join(":");
         res.statusCode = HTTPStatus.OK;
+        logDebug("socket.handshake: %s", data);
         res.writeBody(data, "text/plain;");
     }
 
@@ -76,6 +83,7 @@ class SocketIo
         auto transportName = req.params["transport"];
         auto id = req.params["sessid"];
 
+        logDebug("socket.request: %s", transportName);
         switch(transportName)
         {
         case "websocket":
